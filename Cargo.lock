@@ -1908,6 +1908,7 @@ dependencies = [
  "egui",
  "egui_material_icons",
  "futures-util",
+ "log",
  "reqwest",
  "serde",
  "serde_json",
