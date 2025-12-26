@@ -87,22 +87,22 @@ jobs:
             name: koco-x86_64-linux-gnu.tar.gz
             archive_cmd: tar -czf
             binary_ext: ""
-            rust: "1.86"
+            rust: "1.92"
           - os: [self-hosted, runner-aarch64]
             name: koco-aarch64-linux-gnu.tar.gz
             archive_cmd: tar -czf
             binary_ext: ""
-            rust: "1.86"
+            rust: "1.92"
           - os: macos-latest
             name: koco-aarch64-macos.tar.gz
             archive_cmd: tar -czf
             binary_ext: ""
-            rust: "1.86"
+            rust: "1.92"
           - os: windows-latest
             name: koco-x86_64-windows.zip
             archive_cmd: 7z a
             binary_ext: ".exe"
-            rust: "1.86"
+            rust: "1.92"
     runs-on: ${{ matrix.os }}
 
     steps:
