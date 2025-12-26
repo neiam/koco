@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use futures_util::{StreamExt, SinkExt};
+use log::{debug, info, warn};
 use serde_json::Value;
 
 const DEFAULT_HTTP_PORT : usize = 8080;
@@ -88,6 +89,8 @@ struct NowPlaying {
     artist: String,
     album: String,
     playing: bool,
+    duration: f64,  // Total duration in seconds
+    position: f64,  // Current position in seconds
 }
 
 impl NowPlaying {
@@ -96,6 +99,8 @@ impl NowPlaying {
         self.artist.clear();
         self.album.clear();
         self.playing = false;
+        self.duration = 0.0;
+        self.position = 0.0;
     }
 }
 
@@ -380,16 +385,16 @@ impl KocoConfig {
                 Ok(contents) => {
                     match toml::from_str(&contents) {
                         Ok(config) => {
-                            println!("Loaded config from {:?}", path);
+                            info!("Loaded config from {:?}", path);
                             return config;
                         }
                         Err(e) => {
-                            eprintln!("Failed to parse config: {}. Using default.", e);
+                            info!("Failed to parse config: {}. Using default.", e);
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to read config: {}. Using default.", e);
+                    info!("Failed to read config: {}. Using default.", e);
                 }
             }
         }
@@ -408,7 +413,7 @@ impl KocoConfig {
         file.write_all(toml_string.as_bytes())
             .map_err(|e| format!("Failed to write config file: {}", e))?;
         
-        println!("Saved config to {:?}", path);
+        info!("Saved config to {:?}", path);
         Ok(())
     }
     
@@ -471,6 +476,9 @@ impl Koco {
         // Connect to websocket on startup
         app.connect_websocket();
         
+        // Start position updater
+        app.start_position_updater();
+        
         app
     }
     
@@ -482,13 +490,14 @@ impl Koco {
             
             let ws_url = format!("ws://{}:{}/jsonrpc", instance.hostname, DEFAULT_WS_PORT);
             let now_playing = Arc::clone(&self.now_playing);
+            let current_player_id = Arc::new(Mutex::new(None::<i64>));
             let _username = instance.username.clone();
             let _password = instance.password.clone();
             
             self.runtime.spawn(async move {
                 match connect_async(&ws_url).await {
                     Ok((mut ws_stream, _)) => {
-                        println!("Connected to Kodi WebSocket at {}", ws_url);
+                        debug!("Connected to Kodi WebSocket at {}", ws_url);
                         
                         // Subscribe to player notifications
                         // Note: Kodi doesn't require explicit subscription, it broadcasts all notifications
@@ -500,9 +509,9 @@ impl Koco {
                             "id": 1
                         });
                         
-                        println!("Requesting active players...");
+                        debug!("Requesting active players...");
                         if let Err(e) = ws_stream.send(Message::Text(get_active_players_msg.to_string())).await {
-                            eprintln!("Failed to get active players: {}", e);
+                            debug!("Failed to get active players: {}", e);
                             return;
                         }
                         
@@ -510,39 +519,66 @@ impl Koco {
                         while let Some(msg) = ws_stream.next().await {
                             match msg {
                                 Ok(Message::Text(text)) => {
-                                    println!("Received WebSocket message: {}", text);
+                                    debug!("Received WebSocket message: {}", text);
                                     if let Ok(json) = serde_json::from_str::<Value>(&text) {
                                         if let Some(method) = json.get("method").and_then(|m| m.as_str()) {
-                                            println!("Method: {}", method);
+                                            debug!("Method: {}", method);
                                             match method {
                                                 "Player.OnPlay" | "Player.OnResume" => {
-                                                    println!("Player event detected, requesting item info...");
+                                                    warn!("Player event detected, requesting item info...");
                                                     // Set playing state to true for play/resume
                                                     if let Ok(mut np) = now_playing.lock() {
                                                         np.playing = true;
                                                     }
+                                                    
+                                                    // Get player ID from the notification
+                                                    let player_id = json.get("params")
+                                                        .and_then(|p| p.get("data"))
+                                                        .and_then(|d| d.get("player"))
+                                                        .and_then(|p| p.get("playerid"))
+                                                        .and_then(|id| id.as_i64())
+                                                        .unwrap_or(0);
+                                                    
+                                                    if let Ok(mut pid) = current_player_id.lock() {
+                                                        *pid = Some(player_id);
+                                                    }
+                                                    
+                                                    debug!("Using player ID: {}", player_id);
+                                                    
+                                                    // Request player properties for position/duration
+                                                    let properties_msg = serde_json::json!({
+                                                        "jsonrpc": "2.0",
+                                                        "method": "Player.GetProperties",
+                                                        "params": {
+                                                            "playerid": player_id,
+                                                            "properties": ["time", "totaltime", "percentage"]
+                                                        },
+                                                        "id": 4
+                                                    });
+                                                    let _ = ws_stream.send(Message::Text(properties_msg.to_string())).await;
+                                                    
                                                     // Request current player info
                                                     let player_info_msg = serde_json::json!({
                                                         "jsonrpc": "2.0",
                                                         "method": "Player.GetItem",
                                                         "params": {
-                                                            "playerid": 0,
-                                                            "properties": ["title", "artist", "album", "duration"]
+                                                            "playerid": player_id,
+                                                            "properties": ["title", "artist", "album", "duration", "showtitle", "season", "episode"]
                                                         },
                                                         "id": 2
                                                     });
                                                     let _ = ws_stream.send(Message::Text(player_info_msg.to_string())).await;
                                                 }
                                                 "Player.OnPause" => {
-                                                    println!("Player paused");
+                                                    warn!("Player paused");
                                                     if let Ok(mut np) = now_playing.lock() {
                                                         np.playing = false;
                                                     }
                                                 }
                                                 "Player.OnStop" => {
-                                                    println!("Player stopped");
+                                                    warn!("Player stopped");
                                                     if let Ok(mut np) = now_playing.lock() {
-                                                        println!("Clearing now playing info");
+                                                        debug!("Clearing now playing info");
                                                         np.clear();
                                                     }
                                                 }
@@ -550,33 +586,100 @@ impl Koco {
                                             }
                                         }
                                         
+                                        // Handle errors
+                                        if let Some(error) = json.get("error") {
+                                            info!("Kodi API error: {:?}", error);
+                                            info!("Request ID: {:?}", json.get("id"));
+                                        }
+                                        
                                         if let Some(result) = json.get("result") {
-                                            println!("Got result: {:?}", result);
-                                            // Parse player info response
-                                            if let Some(item) = result.get("item") {
-                                                println!("Parsing item: {:?}", item);
+                                            info!("Got result: {:?}", result);
+                                            info!("Request ID from response: {:?}", json.get("id"));
+                                            
+                                            // Check if this is a direct properties response (not nested in item)
+                                            if let Some(totaltime_obj) = result.get("totaltime") {
+                                                debug!("Got totaltime at root level: {:?}", totaltime_obj);
                                                 if let Ok(mut np) = now_playing.lock() {
-                                                    np.title = item.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                                                    let hours = totaltime_obj.get("hours").and_then(|h| h.as_f64()).unwrap_or(0.0);
+                                                    let minutes = totaltime_obj.get("minutes").and_then(|m| m.as_f64()).unwrap_or(0.0);
+                                                    let seconds = totaltime_obj.get("seconds").and_then(|s| s.as_f64()).unwrap_or(0.0);
+                                                    np.duration = hours * 3600.0 + minutes * 60.0 + seconds;
+                                                    debug!("Updated duration from root properties: {}", np.duration);
+                                                }
+                                            }
+                                            
+                                            // Parse player item info response
+                                            if let Some(item) = result.get("item") {
+                                                debug!("Parsing item: {:?}", item);
+                                                if let Ok(mut np) = now_playing.lock() {
+                                                    let title = item.get("title").and_then(|t| t.as_str()).unwrap_or("");
+                                                    let label = item.get("label").and_then(|l| l.as_str()).unwrap_or("");
+                                                    
+                                                    // Use label if title is empty
+                                                    np.title = if !title.is_empty() { title.to_string() } else { label.to_string() };
                                                     np.artist = item.get("artist").and_then(|a| a.as_array()).and_then(|arr| arr.get(0)).and_then(|a| a.as_str()).unwrap_or("").to_string();
                                                     np.album = item.get("album").and_then(|a| a.as_str()).unwrap_or("").to_string();
+                                                    
+                                                    debug!("Parsed - Title: '{}', Artist: '{}', Album: '{}'", np.title, np.artist, np.album);
                                                     np.playing = true;
-                                                    println!("Updated now playing: {} - {} ({})", np.title, np.artist, np.album);
+                                                }
+                                                // Don't try to get duration from item - it comes from GetProperties
+                                            }
+                                            
+                                            // Handle position from root level
+                                            if let Some(position_obj) = result.get("time").or_else(|| result.get("position")) {
+                                                debug!("Got time/position at root level: {:?}", position_obj);
+                                                if let Ok(mut np) = now_playing.lock() {
+                                                    let hours = position_obj.get("hours").and_then(|h| h.as_f64()).unwrap_or(0.0);
+                                                    let minutes = position_obj.get("minutes").and_then(|m| m.as_f64()).unwrap_or(0.0);
+                                                    let seconds = position_obj.get("seconds").and_then(|s| s.as_f64()).unwrap_or(0.0);
+                                                    np.position = hours * 3600.0 + minutes * 60.0 + seconds;
+                                                    debug!("Updated position: {} / {}", np.position, np.duration);
+                                                    np.playing = true;
+                                                }
+                                            }
+                                            
+                                            // Log summary after parsing
+                                            if result.get("item").is_some() || result.get("totaltime").is_some() || result.get("time").is_some() {
+                                                if let Ok(np) = now_playing.lock() {
+                                                    warn!("==> Now Playing: {} - {} ({}) - {:.0}s / {:.0}s ({:.1}%)",
+                                                        np.title, np.artist, np.album, np.position, np.duration,
+                                                        if np.duration > 0.0 { (np.position / np.duration) * 100.0 } else { 0.0 });
                                                 }
                                             } else if let Some(players) = result.as_array() {
                                                 // Response to GetActivePlayers
-                                                println!("Active players: {:?}", players);
+                                                debug!("Active players: {:?}", players);
                                                 if !players.is_empty() {
                                                     // Get the first active player's info
                                                     if let Some(player_id) = players[0].get("playerid").and_then(|id| id.as_i64()) {
-                                                        println!("Found active player with id: {}", player_id);
+                                                        debug!("Found active player with id: {}", player_id);
+                                                        
+                                                        // Store the player ID
+                                                        if let Ok(mut pid) = current_player_id.lock() {
+                                                            *pid = Some(player_id);
+                                                        }
+                                                        
+                                                        // Request properties first
+                                                        let properties_msg = serde_json::json!({
+                                                            "jsonrpc": "2.0",
+                                                            "method": "Player.GetProperties",
+                                                            "params": {
+                                                                "playerid": player_id,
+                                                                "properties": ["time", "totaltime", "percentage"]
+                                                            },
+                                                            "id": 5
+                                                        });
+                                                        let _ = ws_stream.send(Message::Text(properties_msg.to_string())).await;
+                                                        
+                                                        // Then request item info
                                                         let player_info_msg = serde_json::json!({
                                                             "jsonrpc": "2.0",
                                                             "method": "Player.GetItem",
                                                             "params": {
                                                                 "playerid": player_id,
-                                                                "properties": ["title", "artist", "album", "duration"]
+                                                                "properties": ["title", "artist", "album", "duration", "showtitle", "season", "episode"]
                                                             },
-                                                            "id": 3
+                                                            "id": 6
                                                         });
                                                         let _ = ws_stream.send(Message::Text(player_info_msg.to_string())).await;
                                                     }
@@ -586,11 +689,11 @@ impl Koco {
                                     }
                                 }
                                 Ok(Message::Close(_)) => {
-                                    println!("WebSocket closed");
+                                    debug!("WebSocket closed");
                                     break;
                                 }
                                 Err(e) => {
-                                    eprintln!("WebSocket error: {}", e);
+                                    debug!("WebSocket error: {}", e);
                                     break;
                                 }
                                 _ => {}
@@ -598,11 +701,27 @@ impl Koco {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to connect to WebSocket: {}", e);
+                        debug!("Failed to connect to WebSocket: {}", e);
                     }
                 }
             });
         }
+    }
+    
+    fn start_position_updater(&self) {
+        let now_playing = Arc::clone(&self.now_playing);
+        
+        self.runtime.spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                if let Ok(mut np) = now_playing.lock() {
+                    if np.playing && np.position < np.duration {
+                        np.position += 1.0;
+                    }
+                }
+            }
+        });
     }
     
     fn apply_theme(&self, ctx: &egui::Context) {
@@ -731,10 +850,10 @@ impl Koco {
                                         Ok(instance) => {
                                             self.config.instances[self.current_instance_index] = instance;
                                             if let Err(e) = self.config.save() {
-                                                eprintln!("Failed to save config: {}", e);
+                                                warn!("Failed to save config: {}", e);
                                             }
                                         }
-                                        Err(e) => eprintln!("Invalid instance data: {}", e),
+                                        Err(e) => info!("Invalid instance data: {}", e),
                                     }
                                 }
                                 
@@ -745,7 +864,7 @@ impl Koco {
                                         self.config_ui_state.load_from_instance(&self.config.instances[self.current_instance_index]);
                                     }
                                     if let Err(e) = self.config.save() {
-                                        eprintln!("Failed to save config: {}", e);
+                                        warn!("Failed to save config: {}", e);
                                     }
                                 }
                             });
@@ -805,10 +924,10 @@ impl Koco {
                                     self.config_ui_state.new_events_port.clear();
                                     
                                     if let Err(e) = self.config.save() {
-                                        eprintln!("Failed to save config: {}", e);
+                                        warn!("Failed to save config: {}", e);
                                     }
                                 }
-                                Err(e) => eprintln!("Failed to add instance: {}", e),
+                                Err(e) => warn!("Failed to add instance: {}", e),
                             }
                         }
                     }
@@ -856,37 +975,37 @@ impl eframe::App for Koco {
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowUp) {
                     if let Err(e) = instance.send_key("up") {
-                        eprintln!("Failed to send up command: {}", e);
+                        info!("Failed to send up command: {}", e);
                     }
                 }
                 if i.key_pressed(egui::Key::ArrowDown) {
                     if let Err(e) = instance.send_key("down") {
-                        eprintln!("Failed to send down command: {}", e);
+                        info!("Failed to send down command: {}", e);
                     }
                 }
                 if i.key_pressed(egui::Key::ArrowLeft) {
                     if let Err(e) = instance.send_key("left") {
-                        eprintln!("Failed to send left command: {}", e);
+                        info!("Failed to send left command: {}", e);
                     }
                 }
                 if i.key_pressed(egui::Key::ArrowRight) {
                     if let Err(e) = instance.send_key("right") {
-                        eprintln!("Failed to send right command: {}", e);
+                        info!("Failed to send right command: {}", e);
                     }
                 }
                 if i.key_pressed(egui::Key::Enter) {
                     if let Err(e) = instance.send_key("select") {
-                        eprintln!("Failed to send select command: {}", e);
+                        info!("Failed to send select command: {}", e);
                     }
                 }
                 if i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Backspace) {
                     if let Err(e) = instance.send_key("back") {
-                        eprintln!("Failed to send back command: {}", e);
+                        info!("Failed to send back command: {}", e);
                     }
                 }
                 if i.key_pressed(egui::Key::Space) {
                     if let Err(e) = instance.send_key("playpause") {
-                        eprintln!("Failed to send playpause command: {}", e);
+                        info!("Failed to send playpause command: {}", e);
                     }
                 }
             });
@@ -928,7 +1047,7 @@ impl eframe::App for Koco {
                                 egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_UPWARD).size(48.0))
                             ).clicked() {
                                 if let Err(e) = instance.send_key("up") {
-                                    eprintln!("Failed to send up command: {}", e);
+                                    info!("Failed to send up command: {}", e);
                                 }
                             }
                             ui.label(""); // Empty cell
@@ -939,21 +1058,21 @@ impl eframe::App for Koco {
                                 egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_BACK).size(48.0))
                             ).clicked() {
                                 if let Err(e) = instance.send_key("left") {
-                                    eprintln!("Failed to send left command: {}", e);
+                                    info!("Failed to send left command: {}", e);
                                 }
                             }
                             if ui.add_sized([80.0, 80.0], 
                                 egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_RADIO_BUTTON_CHECKED).size(48.0))
                             ).clicked() {
                                 if let Err(e) = instance.send_key("select") {
-                                    eprintln!("Failed to send select command: {}", e);
+                                    info!("Failed to send select command: {}", e);
                                 }
                             }
                             if ui.add_sized([80.0, 80.0], 
                                 egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_FORWARD).size(48.0))
                             ).clicked() {
                                 if let Err(e) = instance.send_key("right") {
-                                    eprintln!("Failed to send right command: {}", e);
+                                    info!("Failed to send right command: {}", e);
                                 }
                             }
                             ui.end_row();
@@ -963,14 +1082,14 @@ impl eframe::App for Koco {
                                             egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_REPLAY).size(48.0))
                             ).clicked() {
                                 if let Err(e) = instance.send_key("back") {
-                                    eprintln!("Failed to send back command: {}", e);
+                                    info!("Failed to send back command: {}", e);
                                 }
                             }
                             if ui.add_sized([80.0, 80.0], 
                                 egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_DOWNWARD).size(48.0))
                             ).clicked() {
                                 if let Err(e) = instance.send_key("down") {
-                                    eprintln!("Failed to send down command: {}", e);
+                                    info!("Failed to send down command: {}", e);
                                 }
                             }
                             ui.label(""); // Empty cell
@@ -989,21 +1108,43 @@ impl eframe::App for Koco {
         
         // Bottom panel for now playing
         egui::TopBottomPanel::bottom("now_playing_panel").show(ctx, |ui| {
-            ui.add_space(5.0);
             if let Ok(np) = self.now_playing.lock() {
                 if !np.title.is_empty() {
-                    ui.vertical(|ui| {
+                    // Calculate progress percentage
+                    let percentage = if np.duration > 0.0 {
+                        (np.position / np.duration).min(1.0).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    
+                    // Draw custom background with progress
+                    let available_rect = ui.available_rect_before_wrap();
+                    let progress_width = available_rect.width() * percentage as f32;
+                    
+                    // Draw progress background
+                    let progress_rect = egui::Rect::from_min_size(
+                        available_rect.min,
+                        egui::vec2(progress_width, available_rect.height())
+                    );
+                    ui.painter().rect_filled(
+                        progress_rect,
+                        0.0,
+                        egui::Color32::from_rgba_unmultiplied(100, 100, 255, 50)
+                    );
+                    
+                    ui.add_space(5.0);
+                    ui.horizontal(|ui| {
+                        let status_icon = if np.playing { "▶" } else { "⏸" };
+                        ui.label(egui::RichText::new(status_icon).size(16.0));
                         ui.horizontal(|ui| {
-                            let status_icon = if np.playing { "▶" } else { "⏸" };
-                            ui.label(egui::RichText::new(status_icon).size(16.0));
-                            ui.label(egui::RichText::new(&np.title).strong());
+                            ui.label(egui::RichText::new(&np.title).size(16.0).strong());
+                            if !np.artist.is_empty() {
+                                ui.label(egui::RichText::new(&np.artist).size(12.0).weak());
+                            }
+                            if !np.album.is_empty() {
+                                ui.label(egui::RichText::new(&np.album).size(11.0).weak());
+                            }
                         });
-                        if !np.artist.is_empty() {
-                            ui.label(egui::RichText::new(&np.artist).size(12.0).weak());
-                        }
-                        if !np.album.is_empty() {
-                            ui.label(egui::RichText::new(&np.album).size(11.0).weak());
-                        }
                     });
                 } else {
                     ui.label("No media playing");
