@@ -1,0 +1,212 @@
+name: Rust CI and Docker Build
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: [self-hosted, runner-aarch64]
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if command -v apt-get &> /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev libgtk-3-dev libgdk-pixbuf2.0-dev libpango1.0-dev
+          elif command -v yum &> /dev/null; then
+            sudo yum install -y pkgconfig openssl-devel gtk3-devel gdk-pixbuf-devel pango-devel
+          elif command -v dnf &> /dev/null; then
+            sudo dnf install -y pkgconfig openssl-devel
+          elif command -v pacman &> /dev/null; then
+            sudo pacman -Sy --noconfirm pkgconf openssl
+          elif command -v apk &> /dev/null; then
+            sudo apk add --no-cache pkgconfig openssl-dev
+          else
+            echo "Package manager not found. Please install pkg-config and openssl-dev manually."
+            exit 1
+          fi
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.86"
+          components: rustfmt, clippy
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Check
+        run: cargo check
+
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: koco-x86_64-linux-gnu.tar.gz
+            archive_cmd: tar -czf
+            binary_ext: ""
+            rust: "1.86"
+          - os: [self-hosted, runner-aarch64]
+            name: koco-aarch64-linux-gnu.tar.gz
+            archive_cmd: tar -czf
+            binary_ext: ""
+            rust: "1.86"
+          - os: macos-latest
+            name: koco-aarch64-macos.tar.gz
+            archive_cmd: tar -czf
+            binary_ext: ""
+            rust: "1.86"
+          - os: windows-latest
+            name: koco-x86_64-windows.zip
+            archive_cmd: 7z a
+            binary_ext: ".exe"
+            rust: "1.86"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (self-hosted Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if command -v apt-get &> /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev libgtk-3-dev libgdk-pixbuf2.0-dev libpango1.0-dev  libglib2.0-dev
+          elif command -v yum &> /dev/null; then
+            sudo yum install -y pkgconfig openssl-devel gtk3-devel gdk-pixbuf-devel pango-devel
+          elif command -v dnf &> /dev/null; then
+            sudo dnf install -y pkgconfig openssl-devel
+          elif command -v pacman &> /dev/null; then
+            sudo pacman -Sy --noconfirm pkgconf openssl
+          elif command -v apk &> /dev/null; then
+            sudo apk add --no-cache pkgconfig openssl-dev
+          else
+            echo "Package manager not found. Please install pkg-config and openssl-dev manually."
+            exit 1
+          fi
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.rust }}
+
+      - name: Build release binary
+        run: cargo build --release --verbose
+
+      - name: Strip binary (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          strip target/release/koco${{ matrix.binary_ext }}
+
+      - name: Create release archive (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd target/release
+          tar -czf ../../${{ matrix.name }} koco
+          cd ../..
+
+      - name: Create release archive (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd target/release
+          7z a ../../${{ matrix.name }} koco.exe
+          cd ../..
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release notes
+        run: |
+          echo "# koco Release ${GITHUB_REF_NAME}" > release_notes.md
+          echo "" >> release_notes.md
+          echo "## Changes in this release" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "## Supported Platforms" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "- Linux (x86_64)" >> release_notes.md
+          echo "- Linux (aarch64)" >> release_notes.md
+          echo "- Windows (x86_64)" >> release_notes.md
+          echo "- macOS (x86_64 and Apple Silicon)" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "## Installation" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "1. Download the appropriate archive for your platform" >> release_notes.md
+          echo "2. Extract the binaries" >> release_notes.md
+          echo "3. Place them in your PATH" >> release_notes.md
+          echo "" >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*/*.tar.gz,artifacts/*/*.zip
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
