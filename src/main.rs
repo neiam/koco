@@ -1,16 +1,16 @@
+use futures_util::{SinkExt, StreamExt};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-use futures_util::{StreamExt, SinkExt};
-use log::{debug, info, warn};
-use serde_json::Value;
 
-const DEFAULT_HTTP_PORT : usize = 8080;
-const DEFAULT_EVENT_PORT : usize = 9777;
+const DEFAULT_HTTP_PORT: usize = 8080;
+const DEFAULT_EVENT_PORT: usize = 9777;
 
 const DEFAULT_WS_PORT: usize = 9090;
 
@@ -18,11 +18,11 @@ fn default_http_port() -> usize {
     DEFAULT_HTTP_PORT
 }
 
-fn  default_event_port() -> usize {
+fn default_event_port() -> usize {
     DEFAULT_EVENT_PORT
 }
 
-fn truthy () -> bool {
+fn truthy() -> bool {
     true
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -42,7 +42,7 @@ struct Instance {
     events: bool,
 
     #[serde(default = "default_event_port")]
-    events_port: usize
+    events_port: usize,
 }
 
 impl Instance {
@@ -56,29 +56,31 @@ impl Instance {
             },
             "id": 1
         });
-        
+
         // Build the URL
         let url = format!("http://{}:{}/jsonrpc", self.hostname, self.http_port);
-        
+
         // Create the HTTP client
         let client = reqwest::blocking::Client::new();
-        let mut req_builder = client.post(&url)
+        let mut req_builder = client
+            .post(&url)
             .header("Content-Type", "application/json")
             .json(&request);
-        
+
         // Add authentication if present
         if let (Some(username), Some(password)) = (&self.username, &self.password) {
             req_builder = req_builder.basic_auth(username, Some(password));
         }
-        
+
         // Send the request
-        let response = req_builder.send()
+        let response = req_builder
+            .send()
             .map_err(|e| format!("Failed to send request: {}", e))?;
-        
+
         if !response.status().is_success() {
             return Err(format!("Request failed with status: {}", response.status()));
         }
-        
+
         Ok(())
     }
 }
@@ -89,8 +91,8 @@ struct NowPlaying {
     artist: String,
     album: String,
     playing: bool,
-    duration: f64,  // Total duration in seconds
-    position: f64,  // Current position in seconds
+    duration: f64, // Total duration in seconds
+    position: f64, // Current position in seconds
 }
 
 impl NowPlaying {
@@ -131,7 +133,7 @@ struct ConfigUIState {
     password: String,
     events: bool,
     events_port: String,
-    
+
     // For adding new instance
     new_label: String,
     new_hostname: String,
@@ -152,46 +154,69 @@ impl ConfigUIState {
         self.events = instance.events;
         self.events_port = instance.events_port.to_string();
     }
-    
+
     fn to_instance(&self) -> Result<Instance, String> {
-        let http_port = self.http_port.parse::<usize>()
+        let http_port = self
+            .http_port
+            .parse::<usize>()
             .map_err(|_| "Invalid HTTP port number")?;
-        let events_port = self.events_port.parse::<usize>()
+        let events_port = self
+            .events_port
+            .parse::<usize>()
             .map_err(|_| "Invalid events port number")?;
-        
+
         Ok(Instance {
             label: self.label.clone(),
             hostname: self.hostname.clone(),
             http_port,
-            username: if self.username.is_empty() { None } else { Some(self.username.clone()) },
-            password: if self.password.is_empty() { None } else { Some(self.password.clone()) },
+            username: if self.username.is_empty() {
+                None
+            } else {
+                Some(self.username.clone())
+            },
+            password: if self.password.is_empty() {
+                None
+            } else {
+                Some(self.password.clone())
+            },
             events: self.events,
             events_port,
         })
     }
-    
+
     fn new_instance(&self) -> Result<Instance, String> {
         if self.new_hostname.is_empty() {
             return Err("Hostname cannot be empty".to_string());
         }
-        
-        let http_port = self.new_http_port.parse::<usize>()
+
+        let http_port = self
+            .new_http_port
+            .parse::<usize>()
             .unwrap_or(DEFAULT_HTTP_PORT);
-        let events_port = self.new_events_port.parse::<usize>()
+        let events_port = self
+            .new_events_port
+            .parse::<usize>()
             .unwrap_or(DEFAULT_EVENT_PORT);
-        
+
         Ok(Instance {
             label: self.new_label.clone(),
             hostname: self.new_hostname.clone(),
             http_port,
-            username: if self.new_username.is_empty() { None } else { Some(self.new_username.clone()) },
-            password: if self.new_password.is_empty() { None } else { Some(self.new_password.clone()) },
+            username: if self.new_username.is_empty() {
+                None
+            } else {
+                Some(self.new_username.clone())
+            },
+            password: if self.new_password.is_empty() {
+                None
+            } else {
+                Some(self.new_password.clone())
+            },
             events: self.new_events,
             events_port,
         })
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Theme {
@@ -218,7 +243,6 @@ impl Default for Theme {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct KocoConfig {
@@ -372,55 +396,53 @@ impl KocoConfig {
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("koco");
-        
+
         fs::create_dir_all(&config_dir).ok();
         config_dir.join("config.toml")
     }
-    
+
     fn load() -> Self {
         let path = Self::config_path();
-        
+
         if path.exists() {
             match fs::read_to_string(&path) {
-                Ok(contents) => {
-                    match toml::from_str(&contents) {
-                        Ok(config) => {
-                            info!("Loaded config from {:?}", path);
-                            return config;
-                        }
-                        Err(e) => {
-                            info!("Failed to parse config: {}. Using default.", e);
-                        }
+                Ok(contents) => match toml::from_str(&contents) {
+                    Ok(config) => {
+                        info!("Loaded config from {:?}", path);
+                        return config;
                     }
-                }
+                    Err(e) => {
+                        info!("Failed to parse config: {}. Using default.", e);
+                    }
+                },
                 Err(e) => {
                     info!("Failed to read config: {}. Using default.", e);
                 }
             }
         }
-        
+
         Self::default()
     }
-    
+
     fn save(&self) -> Result<(), String> {
         let path = Self::config_path();
         let toml_string = toml::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        
-        let mut file = fs::File::create(&path)
-            .map_err(|e| format!("Failed to create config file: {}", e))?;
-        
+
+        let mut file =
+            fs::File::create(&path).map_err(|e| format!("Failed to create config file: {}", e))?;
+
         file.write_all(toml_string.as_bytes())
             .map_err(|e| format!("Failed to write config file: {}", e))?;
-        
+
         info!("Saved config to {:?}", path);
         Ok(())
     }
-    
+
     fn get_current_theme(&self) -> Option<&Theme> {
         self.themes.iter().find(|t| t.name == self.current_theme)
     }
-    
+
     fn get_current_theme_or_default(&self) -> Theme {
         self.get_current_theme().cloned().unwrap_or_default()
     }
@@ -430,39 +452,39 @@ impl Koco {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Initialize material icons
         egui_material_icons::initialize(&cc.egui_ctx);
-        
+
         let config = KocoConfig::load();
-        
+
         // Apply theme
         let theme = config.get_current_theme_or_default();
         let mut visuals = egui::Visuals::dark();
-        
+
         // Set background color
         visuals.panel_fill = egui::Color32::from_rgb(
             theme.background_color[0],
             theme.background_color[1],
             theme.background_color[2],
         );
-        
+
         // Set text color
         visuals.override_text_color = Some(egui::Color32::from_rgb(
             theme.text_color[0],
             theme.text_color[1],
             theme.text_color[2],
         ));
-        
+
         cc.egui_ctx.set_visuals(visuals);
-        
+
         let mut config_ui_state = ConfigUIState::default();
-        
+
         // Initialize UI state with first instance
         if !config.instances.is_empty() {
             config_ui_state.load_from_instance(&config.instances[0]);
         }
-        
+
         let now_playing = Arc::new(Mutex::new(NowPlaying::default()));
         let runtime = Arc::new(Runtime::new().expect("Failed to create Tokio runtime"));
-        
+
         let app = Self {
             config,
             current_instance_index: 0,
@@ -472,49 +494,49 @@ impl Koco {
             now_playing,
             runtime,
         };
-        
+
         // Connect to websocket on startup
         app.connect_websocket();
-        
+
         // Start position updater
         app.start_position_updater();
-        
+
         app
     }
-    
+
     fn connect_websocket(&self) {
         if let Some(instance) = self.current_instance() {
             if !instance.events {
                 return;
             }
-            
+
             let ws_url = format!("ws://{}:{}/jsonrpc", instance.hostname, DEFAULT_WS_PORT);
             let now_playing = Arc::clone(&self.now_playing);
             let current_player_id = Arc::new(Mutex::new(None::<i64>));
             let _username = instance.username.clone();
             let _password = instance.password.clone();
-            
+
             self.runtime.spawn(async move {
                 match connect_async(&ws_url).await {
                     Ok((mut ws_stream, _)) => {
                         debug!("Connected to Kodi WebSocket at {}", ws_url);
-                        
+
                         // Subscribe to player notifications
                         // Note: Kodi doesn't require explicit subscription, it broadcasts all notifications
-                        
+
                         // Request initial player state
                         let get_active_players_msg = serde_json::json!({
                             "jsonrpc": "2.0",
                             "method": "Player.GetActivePlayers",
                             "id": 1
                         });
-                        
+
                         debug!("Requesting active players...");
                         if let Err(e) = ws_stream.send(Message::Text(get_active_players_msg.to_string())).await {
                             debug!("Failed to get active players: {}", e);
                             return;
                         }
-                        
+
                         // Listen for messages
                         while let Some(msg) = ws_stream.next().await {
                             match msg {
@@ -530,7 +552,7 @@ impl Koco {
                                                     if let Ok(mut np) = now_playing.lock() {
                                                         np.playing = true;
                                                     }
-                                                    
+
                                                     // Get player ID from the notification
                                                     let player_id = json.get("params")
                                                         .and_then(|p| p.get("data"))
@@ -538,13 +560,13 @@ impl Koco {
                                                         .and_then(|p| p.get("playerid"))
                                                         .and_then(|id| id.as_i64())
                                                         .unwrap_or(0);
-                                                    
+
                                                     if let Ok(mut pid) = current_player_id.lock() {
                                                         *pid = Some(player_id);
                                                     }
-                                                    
+
                                                     debug!("Using player ID: {}", player_id);
-                                                    
+
                                                     // Request player properties for position/duration
                                                     let properties_msg = serde_json::json!({
                                                         "jsonrpc": "2.0",
@@ -556,7 +578,7 @@ impl Koco {
                                                         "id": 4
                                                     });
                                                     let _ = ws_stream.send(Message::Text(properties_msg.to_string())).await;
-                                                    
+
                                                     // Request current player info
                                                     let player_info_msg = serde_json::json!({
                                                         "jsonrpc": "2.0",
@@ -585,17 +607,17 @@ impl Koco {
                                                 _ => {}
                                             }
                                         }
-                                        
+
                                         // Handle errors
                                         if let Some(error) = json.get("error") {
                                             info!("Kodi API error: {:?}", error);
                                             info!("Request ID: {:?}", json.get("id"));
                                         }
-                                        
+
                                         if let Some(result) = json.get("result") {
                                             info!("Got result: {:?}", result);
                                             info!("Request ID from response: {:?}", json.get("id"));
-                                            
+
                                             // Check if this is a direct properties response (not nested in item)
                                             if let Some(totaltime_obj) = result.get("totaltime") {
                                                 debug!("Got totaltime at root level: {:?}", totaltime_obj);
@@ -607,25 +629,25 @@ impl Koco {
                                                     debug!("Updated duration from root properties: {}", np.duration);
                                                 }
                                             }
-                                            
+
                                             // Parse player item info response
                                             if let Some(item) = result.get("item") {
                                                 debug!("Parsing item: {:?}", item);
                                                 if let Ok(mut np) = now_playing.lock() {
                                                     let title = item.get("title").and_then(|t| t.as_str()).unwrap_or("");
                                                     let label = item.get("label").and_then(|l| l.as_str()).unwrap_or("");
-                                                    
+
                                                     // Use label if title is empty
                                                     np.title = if !title.is_empty() { title.to_string() } else { label.to_string() };
                                                     np.artist = item.get("artist").and_then(|a| a.as_array()).and_then(|arr| arr.get(0)).and_then(|a| a.as_str()).unwrap_or("").to_string();
                                                     np.album = item.get("album").and_then(|a| a.as_str()).unwrap_or("").to_string();
-                                                    
+
                                                     debug!("Parsed - Title: '{}', Artist: '{}', Album: '{}'", np.title, np.artist, np.album);
                                                     np.playing = true;
                                                 }
                                                 // Don't try to get duration from item - it comes from GetProperties
                                             }
-                                            
+
                                             // Handle position from root level
                                             if let Some(position_obj) = result.get("time").or_else(|| result.get("position")) {
                                                 debug!("Got time/position at root level: {:?}", position_obj);
@@ -638,7 +660,7 @@ impl Koco {
                                                     np.playing = true;
                                                 }
                                             }
-                                            
+
                                             // Log summary after parsing
                                             if result.get("item").is_some() || result.get("totaltime").is_some() || result.get("time").is_some() {
                                                 if let Ok(np) = now_playing.lock() {
@@ -653,12 +675,12 @@ impl Koco {
                                                     // Get the first active player's info
                                                     if let Some(player_id) = players[0].get("playerid").and_then(|id| id.as_i64()) {
                                                         debug!("Found active player with id: {}", player_id);
-                                                        
+
                                                         // Store the player ID
                                                         if let Ok(mut pid) = current_player_id.lock() {
                                                             *pid = Some(player_id);
                                                         }
-                                                        
+
                                                         // Request properties first
                                                         let properties_msg = serde_json::json!({
                                                             "jsonrpc": "2.0",
@@ -670,7 +692,7 @@ impl Koco {
                                                             "id": 5
                                                         });
                                                         let _ = ws_stream.send(Message::Text(properties_msg.to_string())).await;
-                                                        
+
                                                         // Then request item info
                                                         let player_info_msg = serde_json::json!({
                                                             "jsonrpc": "2.0",
@@ -707,10 +729,10 @@ impl Koco {
             });
         }
     }
-    
+
     fn start_position_updater(&self) {
         let now_playing = Arc::clone(&self.now_playing);
-        
+
         self.runtime.spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
             loop {
@@ -723,228 +745,267 @@ impl Koco {
             }
         });
     }
-    
+
     fn apply_theme(&self, ctx: &egui::Context) {
         let theme = self.config.get_current_theme_or_default();
         let mut visuals = egui::Visuals::dark();
-        
+
         visuals.panel_fill = egui::Color32::from_rgb(
             theme.background_color[0],
             theme.background_color[1],
             theme.background_color[2],
         );
-        
+
         visuals.override_text_color = Some(egui::Color32::from_rgb(
             theme.heading_colors[0][0],
             theme.heading_colors[0][1],
             theme.heading_colors[0][2],
         ));
-        
+
         ctx.set_visuals(visuals);
     }
-    
+
     fn render_settings_window(&mut self, ctx: &egui::Context) {
         let mut theme_changed = false;
-        
+
         egui::Window::new("Koco Settings")
             .open(&mut self.show_settings_window)
             .resizable(true)
             .default_size([500.0, 600.0])
             .show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add_space(10.0);
-                
-                // Instance selector
-                ui.horizontal(|ui| {
-                    ui.label("Instance:");
-                    egui::ComboBox::from_id_salt("instance_selector")
-                        .selected_text(if self.current_instance_index < self.config.instances.len() {
-                            &self.config.instances[self.current_instance_index].label
-                        } else {
-                            "None"
-                        })
-                        .show_ui(ui, |ui| {
-                            for (i, instance) in self.config.instances.iter().enumerate() {
-                                if ui.selectable_label(i == self.current_instance_index, &instance.hostname).clicked() {
-                                    self.current_instance_index = i;
-                                    self.config_ui_state.load_from_instance(instance);
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.add_space(10.0);
+
+                    // Instance selector
+                    ui.horizontal(|ui| {
+                        ui.label("Instance:");
+                        egui::ComboBox::from_id_salt("instance_selector")
+                            .selected_text(
+                                if self.current_instance_index < self.config.instances.len() {
+                                    &self.config.instances[self.current_instance_index].label
+                                } else {
+                                    "None"
+                                },
+                            )
+                            .show_ui(ui, |ui| {
+                                for (i, instance) in self.config.instances.iter().enumerate() {
+                                    if ui
+                                        .selectable_label(
+                                            i == self.current_instance_index,
+                                            &instance.hostname,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.current_instance_index = i;
+                                        self.config_ui_state.load_from_instance(instance);
+                                    }
                                 }
-                            }
-                        });
-                });
-                
-                ui.separator();
-                
-                // Theme selector
-                ui.horizontal(|ui| {
-                    ui.label("Theme:");
-                    egui::ComboBox::from_id_salt("theme_selector")
-                        .selected_text(&self.config.current_theme)
-                        .show_ui(ui, |ui| {
-                            for theme in &self.config.themes {
-                                if ui.selectable_label(
-                                    theme.name == self.config.current_theme, 
-                                    &theme.name
-                                ).clicked() {
-                                    self.config.current_theme = theme.name.clone();
-                                    theme_changed = true;
-                                    let _ = self.config.save();
+                            });
+                    });
+
+                    ui.separator();
+
+                    // Theme selector
+                    ui.horizontal(|ui| {
+                        ui.label("Theme:");
+                        egui::ComboBox::from_id_salt("theme_selector")
+                            .selected_text(&self.config.current_theme)
+                            .show_ui(ui, |ui| {
+                                for theme in &self.config.themes {
+                                    if ui
+                                        .selectable_label(
+                                            theme.name == self.config.current_theme,
+                                            &theme.name,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.config.current_theme = theme.name.clone();
+                                        theme_changed = true;
+                                        let _ = self.config.save();
+                                    }
                                 }
+                            });
+                    });
+
+                    ui.separator();
+
+                    // Tabs for Edit/Add
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(
+                            &mut self.settings_tab,
+                            SettingsTab::Edit,
+                            "Edit Instance",
+                        );
+                        ui.selectable_value(
+                            &mut self.settings_tab,
+                            SettingsTab::Add,
+                            "Add Instance",
+                        );
+                    });
+
+                    ui.separator();
+
+                    match self.settings_tab {
+                        SettingsTab::Edit => {
+                            // Edit current instance
+                            if self.current_instance_index < self.config.instances.len() {
+                                ui.heading("Edit Instance");
+
+                                ui.horizontal(|ui| {
+                                    ui.label("Label:");
+                                    ui.text_edit_singleline(&mut self.config_ui_state.label);
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.label("Hostname:");
+                                    ui.text_edit_singleline(&mut self.config_ui_state.hostname);
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.label("HTTP Port:");
+                                    ui.text_edit_singleline(&mut self.config_ui_state.http_port);
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.label("Username:");
+                                    ui.text_edit_singleline(&mut self.config_ui_state.username);
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.label("Password:");
+                                    ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.config_ui_state.password,
+                                        )
+                                        .password(true),
+                                    );
+                                });
+
+                                ui.checkbox(&mut self.config_ui_state.events, "Enable Events");
+
+                                if self.config_ui_state.events {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Events Port:");
+                                        ui.text_edit_singleline(
+                                            &mut self.config_ui_state.events_port,
+                                        );
+                                    });
+                                }
+
+                                ui.horizontal(|ui| {
+                                    if ui.button("Update Instance").clicked() {
+                                        match self.config_ui_state.to_instance() {
+                                            Ok(instance) => {
+                                                self.config.instances
+                                                    [self.current_instance_index] = instance;
+                                                if let Err(e) = self.config.save() {
+                                                    warn!("Failed to save config: {}", e);
+                                                }
+                                            }
+                                            Err(e) => info!("Invalid instance data: {}", e),
+                                        }
+                                    }
+
+                                    if ui.button("Delete Instance").clicked()
+                                        && self.config.instances.len() > 1
+                                    {
+                                        self.config.instances.remove(self.current_instance_index);
+                                        self.current_instance_index =
+                                            self.current_instance_index.saturating_sub(1);
+                                        if !self.config.instances.is_empty() {
+                                            self.config_ui_state.load_from_instance(
+                                                &self.config.instances[self.current_instance_index],
+                                            );
+                                        }
+                                        if let Err(e) = self.config.save() {
+                                            warn!("Failed to save config: {}", e);
+                                        }
+                                    }
+                                });
+                            } else {
+                                ui.label("No instance selected");
                             }
-                        });
-                });
-                
-                ui.separator();
-                
-                // Tabs for Edit/Add
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.settings_tab, SettingsTab::Edit, "Edit Instance");
-                    ui.selectable_value(&mut self.settings_tab, SettingsTab::Add, "Add Instance");
-                });
-                
-                ui.separator();
-                
-                match self.settings_tab {
-                    SettingsTab::Edit => {
-                        // Edit current instance
-                        if self.current_instance_index < self.config.instances.len() {
-                            ui.heading("Edit Instance");
-                            
+                        }
+                        SettingsTab::Add => {
+                            // Add new instance
+                            ui.heading("Add New Instance");
+
                             ui.horizontal(|ui| {
                                 ui.label("Label:");
-                                ui.text_edit_singleline(&mut self.config_ui_state.label);
+                                ui.text_edit_singleline(&mut self.config_ui_state.new_label);
                             });
-                            
+
                             ui.horizontal(|ui| {
                                 ui.label("Hostname:");
-                                ui.text_edit_singleline(&mut self.config_ui_state.hostname);
+                                ui.text_edit_singleline(&mut self.config_ui_state.new_hostname);
                             });
-                            
+
                             ui.horizontal(|ui| {
                                 ui.label("HTTP Port:");
-                                ui.text_edit_singleline(&mut self.config_ui_state.http_port);
+                                ui.text_edit_singleline(&mut self.config_ui_state.new_http_port);
                             });
-                            
+
                             ui.horizontal(|ui| {
                                 ui.label("Username:");
-                                ui.text_edit_singleline(&mut self.config_ui_state.username);
+                                ui.text_edit_singleline(&mut self.config_ui_state.new_username);
                             });
-                            
+
                             ui.horizontal(|ui| {
                                 ui.label("Password:");
-                                ui.add(egui::TextEdit::singleline(&mut self.config_ui_state.password).password(true));
+                                ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.config_ui_state.new_password,
+                                    )
+                                    .password(true),
+                                );
                             });
-                            
-                            ui.checkbox(&mut self.config_ui_state.events, "Enable Events");
-                            
-                            if self.config_ui_state.events {
+
+                            ui.checkbox(&mut self.config_ui_state.new_events, "Enable Events");
+
+                            if self.config_ui_state.new_events {
                                 ui.horizontal(|ui| {
                                     ui.label("Events Port:");
-                                    ui.text_edit_singleline(&mut self.config_ui_state.events_port);
+                                    ui.text_edit_singleline(
+                                        &mut self.config_ui_state.new_events_port,
+                                    );
                                 });
                             }
-                            
-                            ui.horizontal(|ui| {
-                                if ui.button("Update Instance").clicked() {
-                                    match self.config_ui_state.to_instance() {
-                                        Ok(instance) => {
-                                            self.config.instances[self.current_instance_index] = instance;
-                                            if let Err(e) = self.config.save() {
-                                                warn!("Failed to save config: {}", e);
-                                            }
+
+                            if ui.button("Add Instance").clicked() {
+                                match self.config_ui_state.new_instance() {
+                                    Ok(instance) => {
+                                        self.config.instances.push(instance);
+                                        // Clear new instance fields
+                                        self.config_ui_state.new_label.clear();
+                                        self.config_ui_state.new_hostname.clear();
+                                        self.config_ui_state.new_http_port.clear();
+                                        self.config_ui_state.new_username.clear();
+                                        self.config_ui_state.new_password.clear();
+                                        self.config_ui_state.new_events = true;
+                                        self.config_ui_state.new_events_port.clear();
+
+                                        if let Err(e) = self.config.save() {
+                                            warn!("Failed to save config: {}", e);
                                         }
-                                        Err(e) => info!("Invalid instance data: {}", e),
                                     }
+                                    Err(e) => warn!("Failed to add instance: {}", e),
                                 }
-                                
-                                if ui.button("Delete Instance").clicked() && self.config.instances.len() > 1 {
-                                    self.config.instances.remove(self.current_instance_index);
-                                    self.current_instance_index = self.current_instance_index.saturating_sub(1);
-                                    if !self.config.instances.is_empty() {
-                                        self.config_ui_state.load_from_instance(&self.config.instances[self.current_instance_index]);
-                                    }
-                                    if let Err(e) = self.config.save() {
-                                        warn!("Failed to save config: {}", e);
-                                    }
-                                }
-                            });
-                        } else {
-                            ui.label("No instance selected");
-                        }
-                    }
-                    SettingsTab::Add => {
-                        // Add new instance
-                        ui.heading("Add New Instance");
-                        
-                        ui.horizontal(|ui| {
-                            ui.label("Label:");
-                            ui.text_edit_singleline(&mut self.config_ui_state.new_label);
-                        });
-                    
-                    ui.horizontal(|ui| {
-                            ui.label("Hostname:");
-                            ui.text_edit_singleline(&mut self.config_ui_state.new_hostname);
-                    });
-                    
-                    ui.horizontal(|ui| {
-                            ui.label("HTTP Port:");
-                            ui.text_edit_singleline(&mut self.config_ui_state.new_http_port);
-                    });
-                    
-                    ui.horizontal(|ui| {
-                            ui.label("Username:");
-                            ui.text_edit_singleline(&mut self.config_ui_state.new_username);
-                    });
-                    
-                        ui.horizontal(|ui| {
-                            ui.label("Password:");
-                            ui.add(egui::TextEdit::singleline(&mut self.config_ui_state.new_password).password(true));
-                        });
-                        
-                        ui.checkbox(&mut self.config_ui_state.new_events, "Enable Events");
-                        
-                        if self.config_ui_state.new_events {
-                            ui.horizontal(|ui| {
-                                ui.label("Events Port:");
-                                ui.text_edit_singleline(&mut self.config_ui_state.new_events_port);
-                            });
-                        }
-                        
-                        if ui.button("Add Instance").clicked() {
-                            match self.config_ui_state.new_instance() {
-                                Ok(instance) => {
-                                    self.config.instances.push(instance);
-                                    // Clear new instance fields
-                                    self.config_ui_state.new_label.clear();
-                                    self.config_ui_state.new_hostname.clear();
-                                    self.config_ui_state.new_http_port.clear();
-                                    self.config_ui_state.new_username.clear();
-                                    self.config_ui_state.new_password.clear();
-                                    self.config_ui_state.new_events = true;
-                                    self.config_ui_state.new_events_port.clear();
-                                    
-                                    if let Err(e) = self.config.save() {
-                                        warn!("Failed to save config: {}", e);
-                                    }
-                                }
-                                Err(e) => warn!("Failed to add instance: {}", e),
                             }
                         }
                     }
-                }
-                
-                ui.separator();
-                ui.label(format!("Config file: {:?}", KocoConfig::config_path()));
-                ui.add_space(10.0);
+
+                    ui.separator();
+                    ui.label(format!("Config file: {:?}", KocoConfig::config_path()));
+                    ui.add_space(10.0);
+                });
             });
-        });
-        
+
         // Apply theme outside the closure to avoid borrow checker issues
         if theme_changed {
             self.apply_theme(ctx);
         }
     }
-    
+
     fn current_instance(&self) -> Option<&Instance> {
         self.config.instances.get(self.current_instance_index)
     }
@@ -967,9 +1028,9 @@ impl eframe::App for Koco {
         } else {
             "Koco - Kodi Control".to_string()
         };
-        
+
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(window_title));
-        
+
         // Handle keyboard input
         if let Some(instance) = self.current_instance() {
             ctx.input(|i| {
@@ -1011,30 +1072,38 @@ impl eframe::App for Koco {
             });
         }
 
-        let label =self.current_instance().map(|i| i.label.clone()).unwrap_or_else(|| "No instance selected".to_string());
-        
+        let label = self
+            .current_instance()
+            .map(|i| i.label.clone())
+            .unwrap_or_else(|| "No instance selected".to_string());
+
         // Top menu bar
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(format!("Koco - {}", label));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(egui::RichText::new(egui_material_icons::icons::ICON_SETTINGS).size(20.0)).clicked() {
+                    if ui
+                        .button(
+                            egui::RichText::new(egui_material_icons::icons::ICON_SETTINGS)
+                                .size(20.0),
+                        )
+                        .clicked()
+                    {
                         self.show_settings_window = true;
                     }
                 });
             });
         });
-        
+
         // Show settings window
         if self.show_settings_window {
             self.render_settings_window(ctx);
         }
-        
+
         // Main panel
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(instance) = self.current_instance() {
                 ui.vertical_centered(|ui| {
-
                     ui.add_space(20.0);
 
                     // Grid for the DPAD and Select button with sized buttons
@@ -1043,9 +1112,18 @@ impl eframe::App for Koco {
                         .show(ui, |ui| {
                             // Row 1: Empty, Up, Empty
                             ui.label(""); // Empty cell
-                            if ui.add_sized([80.0, 80.0], 
-                                egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_UPWARD).size(48.0))
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [80.0, 80.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(
+                                            egui_material_icons::icons::ICON_ARROW_UPWARD,
+                                        )
+                                        .size(48.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 if let Err(e) = instance.send_key("up") {
                                     info!("Failed to send up command: {}", e);
                                 }
@@ -1054,23 +1132,50 @@ impl eframe::App for Koco {
                             ui.end_row();
 
                             // Row 2: Left, Select, Right
-                            if ui.add_sized([80.0, 80.0], 
-                                egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_BACK).size(48.0))
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [80.0, 80.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(
+                                            egui_material_icons::icons::ICON_ARROW_BACK,
+                                        )
+                                        .size(48.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 if let Err(e) = instance.send_key("left") {
                                     info!("Failed to send left command: {}", e);
                                 }
                             }
-                            if ui.add_sized([80.0, 80.0], 
-                                egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_RADIO_BUTTON_CHECKED).size(48.0))
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [80.0, 80.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(
+                                            egui_material_icons::icons::ICON_RADIO_BUTTON_CHECKED,
+                                        )
+                                        .size(48.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 if let Err(e) = instance.send_key("select") {
                                     info!("Failed to send select command: {}", e);
                                 }
                             }
-                            if ui.add_sized([80.0, 80.0], 
-                                egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_FORWARD).size(48.0))
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [80.0, 80.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(
+                                            egui_material_icons::icons::ICON_ARROW_FORWARD,
+                                        )
+                                        .size(48.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 if let Err(e) = instance.send_key("right") {
                                     info!("Failed to send right command: {}", e);
                                 }
@@ -1078,16 +1183,34 @@ impl eframe::App for Koco {
                             ui.end_row();
 
                             // Row 3: Empty, Down, Empty
-                            if ui.add_sized([80.0, 80.0],
-                                            egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_REPLAY).size(48.0))
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [80.0, 80.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(
+                                            egui_material_icons::icons::ICON_REPLAY,
+                                        )
+                                        .size(48.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 if let Err(e) = instance.send_key("back") {
                                     info!("Failed to send back command: {}", e);
                                 }
                             }
-                            if ui.add_sized([80.0, 80.0], 
-                                egui::Button::new(egui::RichText::new(egui_material_icons::icons::ICON_ARROW_DOWNWARD).size(48.0))
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [80.0, 80.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(
+                                            egui_material_icons::icons::ICON_ARROW_DOWNWARD,
+                                        )
+                                        .size(48.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 if let Err(e) = instance.send_key("down") {
                                     info!("Failed to send down command: {}", e);
                                 }
@@ -1105,7 +1228,7 @@ impl eframe::App for Koco {
                 });
             }
         });
-        
+
         // Bottom panel for now playing
         egui::TopBottomPanel::bottom("now_playing_panel").show(ctx, |ui| {
             if let Ok(np) = self.now_playing.lock() {
@@ -1116,22 +1239,22 @@ impl eframe::App for Koco {
                     } else {
                         0.0
                     };
-                    
+
                     // Draw custom background with progress
                     let available_rect = ui.available_rect_before_wrap();
                     let progress_width = available_rect.width() * percentage as f32;
-                    
+
                     // Draw progress background
                     let progress_rect = egui::Rect::from_min_size(
                         available_rect.min,
-                        egui::vec2(progress_width, available_rect.height())
+                        egui::vec2(progress_width, available_rect.height()),
                     );
                     ui.painter().rect_filled(
                         progress_rect,
                         0.0,
-                        egui::Color32::from_rgba_unmultiplied(100, 100, 255, 50)
+                        egui::Color32::from_rgba_unmultiplied(100, 100, 255, 50),
                     );
-                    
+
                     ui.add_space(5.0);
                     ui.horizontal(|ui| {
                         let status_icon = if np.playing { "▶" } else { "⏸" };

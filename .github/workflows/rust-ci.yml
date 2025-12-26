@@ -51,7 +51,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.86"
+          toolchain: "1.92"
           components: rustfmt, clippy
 
       - name: Setup Rust cache
