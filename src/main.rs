@@ -738,9 +738,11 @@ impl Koco {
             loop {
                 interval.tick().await;
                 if let Ok(mut np) = now_playing.lock()
-                    && np.playing && np.position < np.duration {
-                        np.position += 1.0;
-                    }
+                    && np.playing
+                    && np.position < np.duration
+                {
+                    np.position += 1.0;
+                }
             }
         });
     }
@@ -1034,33 +1036,40 @@ impl eframe::App for Koco {
         if let Some(instance) = self.current_instance() {
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowUp)
-                    && let Err(e) = instance.send_key("up") {
-                        info!("Failed to send up command: {}", e);
-                    }
+                    && let Err(e) = instance.send_key("up")
+                {
+                    info!("Failed to send up command: {}", e);
+                }
                 if i.key_pressed(egui::Key::ArrowDown)
-                    && let Err(e) = instance.send_key("down") {
-                        info!("Failed to send down command: {}", e);
-                    }
+                    && let Err(e) = instance.send_key("down")
+                {
+                    info!("Failed to send down command: {}", e);
+                }
                 if i.key_pressed(egui::Key::ArrowLeft)
-                    && let Err(e) = instance.send_key("left") {
-                        info!("Failed to send left command: {}", e);
-                    }
+                    && let Err(e) = instance.send_key("left")
+                {
+                    info!("Failed to send left command: {}", e);
+                }
                 if i.key_pressed(egui::Key::ArrowRight)
-                    && let Err(e) = instance.send_key("right") {
-                        info!("Failed to send right command: {}", e);
-                    }
+                    && let Err(e) = instance.send_key("right")
+                {
+                    info!("Failed to send right command: {}", e);
+                }
                 if i.key_pressed(egui::Key::Enter)
-                    && let Err(e) = instance.send_key("select") {
-                        info!("Failed to send select command: {}", e);
-                    }
+                    && let Err(e) = instance.send_key("select")
+                {
+                    info!("Failed to send select command: {}", e);
+                }
                 if (i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Backspace))
-                    && let Err(e) = instance.send_key("back") {
-                        info!("Failed to send back command: {}", e);
-                    }
+                    && let Err(e) = instance.send_key("back")
+                {
+                    info!("Failed to send back command: {}", e);
+                }
                 if i.key_pressed(egui::Key::Space)
-                    && let Err(e) = instance.send_key("playpause") {
-                        info!("Failed to send playpause command: {}", e);
-                    }
+                    && let Err(e) = instance.send_key("playpause")
+                {
+                    info!("Failed to send playpause command: {}", e);
+                }
             });
         }
 
@@ -1115,9 +1124,10 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                                && let Err(e) = instance.send_key("up") {
-                                    info!("Failed to send up command: {}", e);
-                                }
+                                && let Err(e) = instance.send_key("up")
+                            {
+                                info!("Failed to send up command: {}", e);
+                            }
                             ui.label(""); // Empty cell
                             ui.end_row();
 
@@ -1133,9 +1143,10 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                                && let Err(e) = instance.send_key("left") {
-                                    info!("Failed to send left command: {}", e);
-                                }
+                                && let Err(e) = instance.send_key("left")
+                            {
+                                info!("Failed to send left command: {}", e);
+                            }
                             if ui
                                 .add_sized(
                                     [80.0, 80.0],
@@ -1147,9 +1158,10 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                                && let Err(e) = instance.send_key("select") {
-                                    info!("Failed to send select command: {}", e);
-                                }
+                                && let Err(e) = instance.send_key("select")
+                            {
+                                info!("Failed to send select command: {}", e);
+                            }
                             if ui
                                 .add_sized(
                                     [80.0, 80.0],
@@ -1161,9 +1173,10 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                                && let Err(e) = instance.send_key("right") {
-                                    info!("Failed to send right command: {}", e);
-                                }
+                                && let Err(e) = instance.send_key("right")
+                            {
+                                info!("Failed to send right command: {}", e);
+                            }
                             ui.end_row();
 
                             // Row 3: Empty, Down, Empty
@@ -1178,9 +1191,10 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                                && let Err(e) = instance.send_key("back") {
-                                    info!("Failed to send back command: {}", e);
-                                }
+                                && let Err(e) = instance.send_key("back")
+                            {
+                                info!("Failed to send back command: {}", e);
+                            }
                             if ui
                                 .add_sized(
                                     [80.0, 80.0],
@@ -1192,9 +1206,10 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                                && let Err(e) = instance.send_key("down") {
-                                    info!("Failed to send down command: {}", e);
-                                }
+                                && let Err(e) = instance.send_key("down")
+                            {
+                                info!("Failed to send down command: {}", e);
+                            }
                             ui.label(""); // Empty cell
                             ui.end_row();
                         });
