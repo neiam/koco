@@ -639,7 +639,7 @@ impl Koco {
 
                                                     // Use label if title is empty
                                                     np.title = if !title.is_empty() { title.to_string() } else { label.to_string() };
-                                                    np.artist = item.get("artist").and_then(|a| a.as_array()).and_then(|arr| arr.get(0)).and_then(|a| a.as_str()).unwrap_or("").to_string();
+                                                    np.artist = item.get("artist").and_then(|a| a.as_array()).and_then(|arr| arr.first()).and_then(|a| a.as_str()).unwrap_or("").to_string();
                                                     np.album = item.get("album").and_then(|a| a.as_str()).unwrap_or("").to_string();
 
                                                     debug!("Parsed - Title: '{}', Artist: '{}', Album: '{}'", np.title, np.artist, np.album);
@@ -737,11 +737,10 @@ impl Koco {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
             loop {
                 interval.tick().await;
-                if let Ok(mut np) = now_playing.lock() {
-                    if np.playing && np.position < np.duration {
+                if let Ok(mut np) = now_playing.lock()
+                    && np.playing && np.position < np.duration {
                         np.position += 1.0;
                     }
-                }
             }
         });
     }
@@ -1034,41 +1033,34 @@ impl eframe::App for Koco {
         // Handle keyboard input
         if let Some(instance) = self.current_instance() {
             ctx.input(|i| {
-                if i.key_pressed(egui::Key::ArrowUp) {
-                    if let Err(e) = instance.send_key("up") {
+                if i.key_pressed(egui::Key::ArrowUp)
+                    && let Err(e) = instance.send_key("up") {
                         info!("Failed to send up command: {}", e);
                     }
-                }
-                if i.key_pressed(egui::Key::ArrowDown) {
-                    if let Err(e) = instance.send_key("down") {
+                if i.key_pressed(egui::Key::ArrowDown)
+                    && let Err(e) = instance.send_key("down") {
                         info!("Failed to send down command: {}", e);
                     }
-                }
-                if i.key_pressed(egui::Key::ArrowLeft) {
-                    if let Err(e) = instance.send_key("left") {
+                if i.key_pressed(egui::Key::ArrowLeft)
+                    && let Err(e) = instance.send_key("left") {
                         info!("Failed to send left command: {}", e);
                     }
-                }
-                if i.key_pressed(egui::Key::ArrowRight) {
-                    if let Err(e) = instance.send_key("right") {
+                if i.key_pressed(egui::Key::ArrowRight)
+                    && let Err(e) = instance.send_key("right") {
                         info!("Failed to send right command: {}", e);
                     }
-                }
-                if i.key_pressed(egui::Key::Enter) {
-                    if let Err(e) = instance.send_key("select") {
+                if i.key_pressed(egui::Key::Enter)
+                    && let Err(e) = instance.send_key("select") {
                         info!("Failed to send select command: {}", e);
                     }
-                }
-                if i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Backspace) {
-                    if let Err(e) = instance.send_key("back") {
+                if (i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Backspace))
+                    && let Err(e) = instance.send_key("back") {
                         info!("Failed to send back command: {}", e);
                     }
-                }
-                if i.key_pressed(egui::Key::Space) {
-                    if let Err(e) = instance.send_key("playpause") {
+                if i.key_pressed(egui::Key::Space)
+                    && let Err(e) = instance.send_key("playpause") {
                         info!("Failed to send playpause command: {}", e);
                     }
-                }
             });
         }
 
@@ -1123,11 +1115,9 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                            {
-                                if let Err(e) = instance.send_key("up") {
+                                && let Err(e) = instance.send_key("up") {
                                     info!("Failed to send up command: {}", e);
                                 }
-                            }
                             ui.label(""); // Empty cell
                             ui.end_row();
 
@@ -1143,11 +1133,9 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                            {
-                                if let Err(e) = instance.send_key("left") {
+                                && let Err(e) = instance.send_key("left") {
                                     info!("Failed to send left command: {}", e);
                                 }
-                            }
                             if ui
                                 .add_sized(
                                     [80.0, 80.0],
@@ -1159,11 +1147,9 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                            {
-                                if let Err(e) = instance.send_key("select") {
+                                && let Err(e) = instance.send_key("select") {
                                     info!("Failed to send select command: {}", e);
                                 }
-                            }
                             if ui
                                 .add_sized(
                                     [80.0, 80.0],
@@ -1175,11 +1161,9 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                            {
-                                if let Err(e) = instance.send_key("right") {
+                                && let Err(e) = instance.send_key("right") {
                                     info!("Failed to send right command: {}", e);
                                 }
-                            }
                             ui.end_row();
 
                             // Row 3: Empty, Down, Empty
@@ -1194,11 +1178,9 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                            {
-                                if let Err(e) = instance.send_key("back") {
+                                && let Err(e) = instance.send_key("back") {
                                     info!("Failed to send back command: {}", e);
                                 }
-                            }
                             if ui
                                 .add_sized(
                                     [80.0, 80.0],
@@ -1210,11 +1192,9 @@ impl eframe::App for Koco {
                                     ),
                                 )
                                 .clicked()
-                            {
-                                if let Err(e) = instance.send_key("down") {
+                                && let Err(e) = instance.send_key("down") {
                                     info!("Failed to send down command: {}", e);
                                 }
-                            }
                             ui.label(""); // Empty cell
                             ui.end_row();
                         });
@@ -1235,7 +1215,7 @@ impl eframe::App for Koco {
                 if !np.title.is_empty() {
                     // Calculate progress percentage
                     let percentage = if np.duration > 0.0 {
-                        (np.position / np.duration).min(1.0).max(0.0)
+                        (np.position / np.duration).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
