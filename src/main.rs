@@ -861,8 +861,8 @@ impl Koco {
                             if let Some(msg) = msg_opt {
                                 info!("Received MQTT message: {}", msg.payload_str());
                                 // Parse the theme payload
-                                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.payload_str()) {
-                                    if let Some(theme_name) = payload.get("theme").and_then(|t| t.as_str()) {
+                                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.payload_str())
+                                    && let Some(theme_name) = payload.get("theme").and_then(|t| t.as_str()) {
                                         info!("Received theme update: {}", theme_name);
 
                                         // Update config with new theme
@@ -891,7 +891,6 @@ impl Koco {
                                             }
                                         }
                                     }
-                                }
                             }
                         }
 
@@ -1255,8 +1254,8 @@ impl Koco {
 impl eframe::App for Koco {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check if theme was changed via MQTT and reload config + apply theme
-        if let Ok(mut changed) = self.theme_changed.lock() {
-            if *changed {
+        if let Ok(mut changed) = self.theme_changed.lock()
+            && *changed {
                 *changed = false;
                 // Reload config from disk
                 self.config = KocoConfig::load();
@@ -1267,7 +1266,6 @@ impl eframe::App for Koco {
                 // Request repaint to apply visual changes
                 ctx.request_repaint();
             }
-        }
 
         // Request periodic repaints to check for MQTT theme updates
         if self.config.mqtt_enabled {
