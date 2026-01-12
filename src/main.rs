@@ -1255,17 +1255,18 @@ impl eframe::App for Koco {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check if theme was changed via MQTT and reload config + apply theme
         if let Ok(mut changed) = self.theme_changed.lock()
-            && *changed {
-                *changed = false;
-                // Reload config from disk
-                self.config = KocoConfig::load();
-                // Apply the new theme
-                self.apply_theme(ctx);
-                // Update UI state to match
-                self.config_ui_state.load_mqtt_config(&self.config);
-                // Request repaint to apply visual changes
-                ctx.request_repaint();
-            }
+            && *changed
+        {
+            *changed = false;
+            // Reload config from disk
+            self.config = KocoConfig::load();
+            // Apply the new theme
+            self.apply_theme(ctx);
+            // Update UI state to match
+            self.config_ui_state.load_mqtt_config(&self.config);
+            // Request repaint to apply visual changes
+            ctx.request_repaint();
+        }
 
         // Request periodic repaints to check for MQTT theme updates
         if self.config.mqtt_enabled {
