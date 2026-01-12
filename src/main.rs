@@ -114,6 +114,7 @@ struct Koco {
     config_ui_state: ConfigUIState,
     now_playing: Arc<Mutex<NowPlaying>>,
     runtime: Arc<Runtime>,
+    theme_changed: Arc<Mutex<bool>>,
 }
 
 #[derive(Default, PartialEq)]
@@ -121,6 +122,7 @@ enum SettingsTab {
     #[default]
     Edit,
     Add,
+    MqttConfig,
 }
 
 #[derive(Default)]
@@ -142,6 +144,13 @@ struct ConfigUIState {
     new_password: String,
     new_events: bool,
     new_events_port: String,
+    
+    // For MQTT config
+    mqtt_enabled: bool,
+    mqtt_host: String,
+    mqtt_username: String,
+    mqtt_password: String,
+    mqtt_topic: String,
 }
 
 impl ConfigUIState {
@@ -153,6 +162,14 @@ impl ConfigUIState {
         self.password = instance.password.clone().unwrap_or_default();
         self.events = instance.events;
         self.events_port = instance.events_port.to_string();
+    }
+    
+    fn load_mqtt_config(&mut self, config: &KocoConfig) {
+        self.mqtt_enabled = config.mqtt_enabled;
+        self.mqtt_host = config.mqtt_host.clone();
+        self.mqtt_username = config.mqtt_username.clone().unwrap_or_default();
+        self.mqtt_password = config.mqtt_password.clone().unwrap_or_default();
+        self.mqtt_topic = config.mqtt_topic.clone();
     }
 
     fn to_instance(&self) -> Result<Instance, String> {
@@ -249,6 +266,24 @@ struct KocoConfig {
     instances: Vec<Instance>,
     current_theme: String,
     themes: Vec<Theme>,
+    #[serde(default)]
+    mqtt_enabled: bool,
+    #[serde(default = "default_mqtt_host")]
+    mqtt_host: String,
+    #[serde(default)]
+    mqtt_username: Option<String>,
+    #[serde(default)]
+    mqtt_password: Option<String>,
+    #[serde(default = "default_mqtt_topic")]
+    mqtt_topic: String,
+}
+
+fn default_mqtt_host() -> String {
+    "tcp://localhost:1883".to_string()
+}
+
+fn default_mqtt_topic() -> String {
+    "neiam/sync/theme".to_string()
 }
 
 fn create_default_themes() -> Vec<Theme> {
@@ -387,6 +422,11 @@ impl Default for KocoConfig {
             }],
             current_theme: "Default".to_string(),
             themes: create_default_themes(),
+            mqtt_enabled: false,
+            mqtt_host: default_mqtt_host(),
+            mqtt_username: None,
+            mqtt_password: None,
+            mqtt_topic: default_mqtt_topic(),
         }
     }
 }
@@ -481,9 +521,12 @@ impl Koco {
         if !config.instances.is_empty() {
             config_ui_state.load_from_instance(&config.instances[0]);
         }
+        
+        config_ui_state.load_mqtt_config(&config);
 
         let now_playing = Arc::new(Mutex::new(NowPlaying::default()));
         let runtime = Arc::new(Runtime::new().expect("Failed to create Tokio runtime"));
+        let theme_changed = Arc::new(Mutex::new(false));
 
         let app = Self {
             config,
@@ -493,6 +536,7 @@ impl Koco {
             config_ui_state,
             now_playing,
             runtime,
+            theme_changed,
         };
 
         // Connect to websocket on startup
@@ -500,6 +544,9 @@ impl Koco {
 
         // Start position updater
         app.start_position_updater();
+
+        // Start MQTT subscriber if enabled
+        app.start_mqtt_subscriber();
 
         app
     }
@@ -747,6 +794,121 @@ impl Koco {
         });
     }
 
+    fn start_mqtt_subscriber(&self) {
+        if !self.config.mqtt_enabled {
+            info!("MQTT subscription is disabled");
+            return;
+        }
+
+        let mqtt_host = self.config.mqtt_host.clone();
+        let mqtt_topic = self.config.mqtt_topic.clone();
+        let mqtt_username = self.config.mqtt_username.clone();
+        let mqtt_password = self.config.mqtt_password.clone();
+        let config = Arc::new(Mutex::new(self.config.clone()));
+        let theme_changed = Arc::clone(&self.theme_changed);
+
+        info!("Starting MQTT subscriber for topic: {}", mqtt_topic);
+
+        self.runtime.spawn(async move {
+            loop {
+                // Create MQTT client
+                let create_opts = match paho_mqtt::CreateOptionsBuilder::new()
+                    .server_uri(&mqtt_host)
+                    .client_id("koco-theme-subscriber")
+                    .finalize()
+                {
+                    opts => opts,
+                };
+
+                let mut client = match paho_mqtt::AsyncClient::new(create_opts) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!("Failed to create MQTT client: {}", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+
+                // Set up connection options
+                let conn_opts = {
+                    let mut conn_opts_builder = paho_mqtt::ConnectOptionsBuilder::new();
+                    conn_opts_builder.keep_alive_interval(std::time::Duration::from_secs(20));
+                    conn_opts_builder.clean_session(true);
+                    conn_opts_builder.automatic_reconnect(std::time::Duration::from_secs(1), std::time::Duration::from_secs(30));
+
+                    if let (Some(username), Some(password)) = (&mqtt_username, &mqtt_password) {
+                        conn_opts_builder.user_name(username).password(password);
+                    }
+                    conn_opts_builder.finalize()
+                };
+
+                // Connect and subscribe
+                match client.connect(conn_opts).await {
+                    Ok(_) => {
+                        info!("Connected to MQTT broker at {}", mqtt_host);
+                        match client.subscribe(&mqtt_topic, 1).await {
+                            Ok(_) => info!("Subscribed to MQTT topic: {}", mqtt_topic),
+                            Err(e) => {
+                                warn!("Failed to subscribe to MQTT topic: {}", e);
+                                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                                continue;
+                            }
+                        }
+
+                        // Start consuming messages
+                        let mut stream = client.get_stream(25);
+                        while let Some(msg_opt) = stream.next().await {
+                            if let Some(msg) = msg_opt {
+                                info!("Received MQTT message: {}", msg.payload_str());
+                                
+                                // Parse the theme payload
+                                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.payload_str()) {
+                                    if let Some(theme_name) = payload.get("theme").and_then(|t| t.as_str()) {
+                                        info!("Received theme update: {}", theme_name);
+                                        
+                                        // Update config with new theme
+                                        if let Ok(mut cfg) = config.lock() {
+                                            // Search for theme by name (case-insensitive)
+                                            let matching_theme = cfg.themes.iter()
+                                                .find(|t| t.name.eq_ignore_ascii_case(theme_name));
+                                            
+                                            if let Some(theme) = matching_theme {
+                                                let theme_name_found = theme.name.clone();
+                                                
+                                                if cfg.current_theme != theme_name_found {
+                                                    cfg.current_theme = theme_name_found.clone();
+                                                    if let Err(e) = cfg.save() {
+                                                        warn!("Failed to save theme update: {}", e);
+                                                    } else {
+                                                        info!("Updated theme to: {}", theme_name_found);
+                                                        // Signal that the theme has changed
+                                                        if let Ok(mut changed) = theme_changed.lock() {
+                                                            *changed = true;
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                warn!("Theme '{}' not found in available themes, keeping current", theme_name);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        warn!("MQTT stream ended, reconnecting...");
+                    }
+                    Err(e) => {
+                        warn!("Failed to connect to MQTT broker: {}", e);
+                    }
+                }
+
+                // Wait before reconnecting
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+        });
+    }
+
     fn apply_theme(&self, ctx: &egui::Context) {
         let theme = self.config.get_current_theme_or_default();
         let mut visuals = egui::Visuals::dark();
@@ -841,6 +1003,11 @@ impl Koco {
                             &mut self.settings_tab,
                             SettingsTab::Add,
                             "Add Instance",
+                        );
+                        ui.selectable_value(
+                            &mut self.settings_tab,
+                            SettingsTab::MqttConfig,
+                            "MQTT Theme Sync",
                         );
                     });
 
@@ -993,6 +1160,71 @@ impl Koco {
                                 }
                             }
                         }
+                        SettingsTab::MqttConfig => {
+                            // MQTT Configuration
+                            ui.heading("MQTT Theme Synchronization");
+                            ui.add_space(5.0);
+                            
+                            ui.label("Subscribe to theme updates from theme-sender");
+                            ui.add_space(10.0);
+                            
+                            ui.checkbox(&mut self.config_ui_state.mqtt_enabled, "Enable MQTT Subscription");
+                            ui.add_space(10.0);
+                            
+                            if self.config_ui_state.mqtt_enabled {
+                                ui.horizontal(|ui| {
+                                    ui.label("MQTT Host:");
+                                    ui.text_edit_singleline(&mut self.config_ui_state.mqtt_host);
+                                });
+                                ui.label("Example: tcp://localhost:1883");
+                                ui.add_space(5.0);
+                                
+                                ui.horizontal(|ui| {
+                                    ui.label("Topic:");
+                                    ui.text_edit_singleline(&mut self.config_ui_state.mqtt_topic);
+                                });
+                                ui.label("Example: neiam/sync/theme");
+                                ui.add_space(5.0);
+                                
+                                ui.horizontal(|ui| {
+                                    ui.label("Username (optional):");
+                                    ui.text_edit_singleline(&mut self.config_ui_state.mqtt_username);
+                                });
+                                
+                                ui.horizontal(|ui| {
+                                    ui.label("Password (optional):");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.config_ui_state.mqtt_password)
+                                            .password(true),
+                                    );
+                                });
+                            }
+                            
+                            ui.add_space(15.0);
+                            
+                            if ui.button("Save MQTT Configuration").clicked() {
+                                self.config.mqtt_enabled = self.config_ui_state.mqtt_enabled;
+                                self.config.mqtt_host = self.config_ui_state.mqtt_host.clone();
+                                self.config.mqtt_topic = self.config_ui_state.mqtt_topic.clone();
+                                self.config.mqtt_username = if self.config_ui_state.mqtt_username.is_empty() {
+                                    None
+                                } else {
+                                    Some(self.config_ui_state.mqtt_username.clone())
+                                };
+                                self.config.mqtt_password = if self.config_ui_state.mqtt_password.is_empty() {
+                                    None
+                                } else {
+                                    Some(self.config_ui_state.mqtt_password.clone())
+                                };
+                                
+                                if let Err(e) = self.config.save() {
+                                    warn!("Failed to save config: {}", e);
+                                } else {
+                                    info!("MQTT configuration saved");
+                                    // TODO: Restart MQTT subscription with new settings
+                                }
+                            }
+                        }
                     }
 
                     ui.separator();
@@ -1014,6 +1246,26 @@ impl Koco {
 
 impl eframe::App for Koco {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check if theme was changed via MQTT and reload config + apply theme
+        if let Ok(mut changed) = self.theme_changed.lock() {
+            if *changed {
+                *changed = false;
+                // Reload config from disk
+                self.config = KocoConfig::load();
+                // Apply the new theme
+                self.apply_theme(ctx);
+                // Update UI state to match
+                self.config_ui_state.load_mqtt_config(&self.config);
+                // Request repaint to apply visual changes
+                ctx.request_repaint();
+            }
+        }
+        
+        // Request periodic repaints to check for MQTT theme updates
+        if self.config.mqtt_enabled {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        
         // Update window title with now-playing info
         let window_title = if let Ok(np) = self.now_playing.lock() {
             if !np.title.is_empty() {
@@ -1034,7 +1286,35 @@ impl eframe::App for Koco {
 
         // Handle keyboard input
         if let Some(instance) = self.current_instance() {
+            // Handle mouse scroll events for volume control
             ctx.input(|i| {
+                let scroll_delta = i.smooth_scroll_delta.y;
+                
+                if scroll_delta > 0.0 {
+                    // Scroll up = volume up
+                    if let Err(e) = instance.send_key("volumeup") {
+                        info!("Failed to send volumeup command: {}", e);
+                    }
+                } else if scroll_delta < 0.0 {
+                    // Scroll down = volume down
+                    if let Err(e) = instance.send_key("volumedown") {
+                        info!("Failed to send volumedown command: {}", e);
+                    }
+                }
+            });
+            
+            // Handle keyboard input including Page Up/Down for volume
+            ctx.input(|i| {
+                if i.key_pressed(egui::Key::PageUp)
+                    && let Err(e) = instance.send_key("volumeup")
+                {
+                    info!("Failed to send volumeup command: {}", e);
+                }
+                if i.key_pressed(egui::Key::PageDown)
+                    && let Err(e) = instance.send_key("volumedown")
+                {
+                    info!("Failed to send volumedown command: {}", e);
+                }
                 if i.key_pressed(egui::Key::ArrowUp)
                     && let Err(e) = instance.send_key("up")
                 {
@@ -1274,6 +1554,9 @@ impl eframe::App for Koco {
 }
 
 fn main() -> eframe::Result {
+    // Initialize env_logger to enable RUST_LOG support
+    env_logger::init();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([280.0, 400.0]),
         ..Default::default()

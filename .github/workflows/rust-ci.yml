@@ -19,7 +19,7 @@ jobs:
         include:
           - runner: ubuntu-latest
             arch: x86_64
-          - runner: [self-hosted, runner-aarch64]
+          - runner: ubuntu-24.04-arm
             arch: aarch64
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -72,6 +72,30 @@ jobs:
       - name: Check
         run: cargo check
 
+      - name: Build release artifact
+        run: cargo build --release --verbose
+
+      - name: Strip binary
+        run: strip target/release/koco
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build test Debian package
+        run: cargo deb --no-build --no-strip
+
+      - name: Upload test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: koco-test-${{ matrix.arch }}-linux
+          path: target/release/koco
+
+      - name: Upload test Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: koco-test-${{ matrix.arch }}-linux.deb
+          path: target/debian/*.deb
+
 
   release:
     name: Release
@@ -88,7 +112,7 @@ jobs:
             archive_cmd: tar -czf
             binary_ext: ""
             rust: "1.92"
-          - os: [self-hosted, runner-aarch64]
+          - os: ubuntu-24.04-arm
             name: koco-aarch64-linux-gnu.tar.gz
             archive_cmd: tar -czf
             binary_ext: ""
@@ -159,11 +183,26 @@ jobs:
           7z a ../../${{ matrix.name }} koco.exe
           cd ../..
 
+      - name: Install cargo-deb (Linux)
+        if: runner.os == 'Linux'
+        run: cargo install cargo-deb
+
+      - name: Build Debian package (Linux)
+        if: runner.os == 'Linux'
+        run: cargo deb --no-build --no-strip
+
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.name }}
+
+      - name: Upload Debian package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: koco-${{ matrix.os }}.deb
+          path: target/debian/*.deb
 
   create-release:
     name: Create Release
@@ -203,7 +242,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/*/*.tar.gz,artifacts/*/*.zip
+          files: |
+            artifacts/*/*.tar.gz
+            artifacts/*/*.zip
+            artifacts/*/*.deb
           body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
