@@ -812,13 +812,12 @@ impl Koco {
         self.runtime.spawn(async move {
             loop {
                 // Create MQTT client
-                let create_opts = match paho_mqtt::CreateOptionsBuilder::new()
+                let opts = paho_mqtt::CreateOptionsBuilder::new()
                     .server_uri(&mqtt_host)
                     .client_id("koco-theme-subscriber")
-                    .finalize()
-                {
-                    opts => opts,
-                };
+                    .finalize();
+
+                let create_opts = opts;
 
                 let mut client = match paho_mqtt::AsyncClient::new(create_opts) {
                     Ok(c) => c,
