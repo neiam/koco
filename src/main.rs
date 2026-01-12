@@ -144,7 +144,7 @@ struct ConfigUIState {
     new_password: String,
     new_events: bool,
     new_events_port: String,
-    
+
     // For MQTT config
     mqtt_enabled: bool,
     mqtt_host: String,
@@ -163,7 +163,7 @@ impl ConfigUIState {
         self.events = instance.events;
         self.events_port = instance.events_port.to_string();
     }
-    
+
     fn load_mqtt_config(&mut self, config: &KocoConfig) {
         self.mqtt_enabled = config.mqtt_enabled;
         self.mqtt_host = config.mqtt_host.clone();
@@ -521,7 +521,7 @@ impl Koco {
         if !config.instances.is_empty() {
             config_ui_state.load_from_instance(&config.instances[0]);
         }
-        
+
         config_ui_state.load_mqtt_config(&config);
 
         let now_playing = Arc::new(Mutex::new(NowPlaying::default()));
@@ -860,21 +860,20 @@ impl Koco {
                         while let Some(msg_opt) = stream.next().await {
                             if let Some(msg) = msg_opt {
                                 info!("Received MQTT message: {}", msg.payload_str());
-                                
                                 // Parse the theme payload
                                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.payload_str()) {
                                     if let Some(theme_name) = payload.get("theme").and_then(|t| t.as_str()) {
                                         info!("Received theme update: {}", theme_name);
-                                        
+
                                         // Update config with new theme
                                         if let Ok(mut cfg) = config.lock() {
                                             // Search for theme by name (case-insensitive)
                                             let matching_theme = cfg.themes.iter()
                                                 .find(|t| t.name.eq_ignore_ascii_case(theme_name));
-                                            
+
                                             if let Some(theme) = matching_theme {
                                                 let theme_name_found = theme.name.clone();
-                                                
+
                                                 if cfg.current_theme != theme_name_found {
                                                     cfg.current_theme = theme_name_found.clone();
                                                     if let Err(e) = cfg.save() {
@@ -1164,13 +1163,16 @@ impl Koco {
                             // MQTT Configuration
                             ui.heading("MQTT Theme Synchronization");
                             ui.add_space(5.0);
-                            
+
                             ui.label("Subscribe to theme updates from theme-sender");
                             ui.add_space(10.0);
-                            
-                            ui.checkbox(&mut self.config_ui_state.mqtt_enabled, "Enable MQTT Subscription");
+
+                            ui.checkbox(
+                                &mut self.config_ui_state.mqtt_enabled,
+                                "Enable MQTT Subscription",
+                            );
                             ui.add_space(10.0);
-                            
+
                             if self.config_ui_state.mqtt_enabled {
                                 ui.horizontal(|ui| {
                                     ui.label("MQTT Host:");
@@ -1178,45 +1180,51 @@ impl Koco {
                                 });
                                 ui.label("Example: tcp://localhost:1883");
                                 ui.add_space(5.0);
-                                
+
                                 ui.horizontal(|ui| {
                                     ui.label("Topic:");
                                     ui.text_edit_singleline(&mut self.config_ui_state.mqtt_topic);
                                 });
                                 ui.label("Example: neiam/sync/theme");
                                 ui.add_space(5.0);
-                                
+
                                 ui.horizontal(|ui| {
                                     ui.label("Username (optional):");
-                                    ui.text_edit_singleline(&mut self.config_ui_state.mqtt_username);
+                                    ui.text_edit_singleline(
+                                        &mut self.config_ui_state.mqtt_username,
+                                    );
                                 });
-                                
+
                                 ui.horizontal(|ui| {
                                     ui.label("Password (optional):");
                                     ui.add(
-                                        egui::TextEdit::singleline(&mut self.config_ui_state.mqtt_password)
-                                            .password(true),
+                                        egui::TextEdit::singleline(
+                                            &mut self.config_ui_state.mqtt_password,
+                                        )
+                                        .password(true),
                                     );
                                 });
                             }
-                            
+
                             ui.add_space(15.0);
-                            
+
                             if ui.button("Save MQTT Configuration").clicked() {
                                 self.config.mqtt_enabled = self.config_ui_state.mqtt_enabled;
                                 self.config.mqtt_host = self.config_ui_state.mqtt_host.clone();
                                 self.config.mqtt_topic = self.config_ui_state.mqtt_topic.clone();
-                                self.config.mqtt_username = if self.config_ui_state.mqtt_username.is_empty() {
-                                    None
-                                } else {
-                                    Some(self.config_ui_state.mqtt_username.clone())
-                                };
-                                self.config.mqtt_password = if self.config_ui_state.mqtt_password.is_empty() {
-                                    None
-                                } else {
-                                    Some(self.config_ui_state.mqtt_password.clone())
-                                };
-                                
+                                self.config.mqtt_username =
+                                    if self.config_ui_state.mqtt_username.is_empty() {
+                                        None
+                                    } else {
+                                        Some(self.config_ui_state.mqtt_username.clone())
+                                    };
+                                self.config.mqtt_password =
+                                    if self.config_ui_state.mqtt_password.is_empty() {
+                                        None
+                                    } else {
+                                        Some(self.config_ui_state.mqtt_password.clone())
+                                    };
+
                                 if let Err(e) = self.config.save() {
                                     warn!("Failed to save config: {}", e);
                                 } else {
@@ -1260,12 +1268,12 @@ impl eframe::App for Koco {
                 ctx.request_repaint();
             }
         }
-        
+
         // Request periodic repaints to check for MQTT theme updates
         if self.config.mqtt_enabled {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
-        
+
         // Update window title with now-playing info
         let window_title = if let Ok(np) = self.now_playing.lock() {
             if !np.title.is_empty() {
@@ -1289,7 +1297,7 @@ impl eframe::App for Koco {
             // Handle mouse scroll events for volume control
             ctx.input(|i| {
                 let scroll_delta = i.smooth_scroll_delta.y;
-                
+
                 if scroll_delta > 0.0 {
                     // Scroll up = volume up
                     if let Err(e) = instance.send_key("volumeup") {
@@ -1302,7 +1310,7 @@ impl eframe::App for Koco {
                     }
                 }
             });
-            
+
             // Handle keyboard input including Page Up/Down for volume
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::PageUp)
