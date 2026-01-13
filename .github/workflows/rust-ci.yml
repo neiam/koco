@@ -88,7 +88,7 @@ jobs:
         run: cargo deb --no-build --no-strip
 
       - name: Build RPM package
-        run: cargo generate-rpm --no-build --output target/generate-rpm
+        run: cargo generate-rpm
 
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
@@ -209,7 +209,7 @@ jobs:
 
       - name: Build RPM package (Linux)
         if: runner.os == 'Linux'
-        run: cargo generate-rpm --no-build --output target/generate-rpm
+        run: cargo generate-rpm
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
