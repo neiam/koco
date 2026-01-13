@@ -2,6 +2,16 @@
 name = "koco"
 version = "0.1.2"
 edition = "2024"
+description = "A Kodi Controller"
+authors = ["Gabe <gabe@neiam.org>"]
+license = "GPLv3"
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/koco", dest = "/usr/bin/koco", mode = "0755" },
+    { source = "LICENSE", dest = "/usr/share/doc/neiam-koco/LICENSE", doc = true, mode = "0644" },
+    { source = "README.md", dest = "/usr/share/doc/neiam-koco/README.md", doc = true, mode = "0644" },
+]
 
 [dependencies]
 chrono = "0.4"
