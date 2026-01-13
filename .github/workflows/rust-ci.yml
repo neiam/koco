@@ -81,8 +81,14 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb
 
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm
+
       - name: Build test Debian package
         run: cargo deb --no-build --no-strip
+
+      - name: Build RPM package
+        run: cargo generate-rpm --no-build --output target/generate-rpm
 
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
@@ -95,6 +101,12 @@ jobs:
         with:
           name: koco-test-${{ matrix.arch }}-linux.deb
           path: target/debian/*.deb
+
+      - name: Upload test RPM package
+        uses: actions/upload-artifact@v4
+        with:
+          name: koco-test-${{ matrix.arch }}-linux.rpm
+          path: target/generate-rpm/*.rpm
 
 
   release:
@@ -191,6 +203,14 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo deb --no-build --no-strip
 
+      - name: Install cargo-generate-rpm (Linux)
+        if: runner.os == 'Linux'
+        run: cargo install cargo-generate-rpm
+
+      - name: Build RPM package (Linux)
+        if: runner.os == 'Linux'
+        run: cargo generate-rpm --no-build --output target/generate-rpm
+
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
@@ -203,6 +223,13 @@ jobs:
         with:
           name: koco-${{ matrix.os }}.deb
           path: target/debian/*.deb
+
+      - name: Upload RPM package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: koco-${{ matrix.os }}.rpm
+          path: target/generate-rpm/*.rpm
 
   create-release:
     name: Create Release
@@ -246,6 +273,7 @@ jobs:
             artifacts/*/*.tar.gz
             artifacts/*/*.zip
             artifacts/*/*.deb
+            artifacts/*/*.rpm
           body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
