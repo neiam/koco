@@ -10,7 +10,7 @@ license = "GPLv3"
 [package.metadata.deb]
 assets = [
     # target/release path is special, and gets replaced by cargo-deb with the actual target dir path.
-    ["target/release/cargo-deb", "usr/bin/", "755"],
+    ["target/release/koco", "usr/bin/", "755"],
     { source = "LICENSE.md", dest = "/usr/share/doc/neiam-koco/LICENSE", doc = true, mode = "0644" },
     { source = "README.md", dest = "/usr/share/doc/neiam-koco/README.md", doc = true, mode = "0644" },
     { source = "assets/koco.desktop", dest = "/usr/share/applications/koco.desktop", mode = "644" },
