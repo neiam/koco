@@ -1563,10 +1563,14 @@ fn main() -> eframe::Result {
     // Initialize env_logger to enable RUST_LOG support
     env_logger::init();
 
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([280.0, 400.0]),
         ..Default::default()
     };
+
+    let d = eframe::icon_data::from_png_bytes(include_bytes!("../assets/logo.png"))
+        .expect("The icon data must be valid");
+    options.viewport.icon = Some(Arc::new(d));
 
     eframe::run_native(
         "Koco - Kodi Control",
