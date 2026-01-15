@@ -14,7 +14,7 @@ assets = [
     { source = "LICENSE.md", dest = "/usr/share/doc/neiam-koco/LICENSE", doc = true, mode = "0644" },
     { source = "README.md", dest = "/usr/share/doc/neiam-koco/README.md", doc = true, mode = "0644" },
     { source = "assets/koco.desktop", dest = "/usr/share/applications/koco.desktop", mode = "644" },
-    { source = "assets/logo.png", dest = "/usr/share/icons/hicolor/256x256/koco.png", mode = "644" },
+    { source = "assets/logo.png", dest = "/usr/share/icons/hicolor/256x256/apps/koco.png", mode = "644" },
 ]
 section = "utility"
 license-file = ["LICENSE.md", "4"]
@@ -25,7 +25,7 @@ assets = [
     { source = "LICENSE.md", dest = "/usr/share/doc/neiam-koco/LICENSE", doc = true, mode = "0644" },
     { source = "README.md", dest = "/usr/share/doc/neiam-koco/README.md", doc = true, mode = "0644" },
     { source = "assets/koco.desktop", dest = "/usr/share/applications/koco.desktop", mode = "644" },
-    { source = "assets/logo.png", dest = "/usr/share/icons/hicolor/256x256/koco.png", mode = "644" },
+    { source = "assets/logo.png", dest = "/usr/share/icons/hicolor/256x256/apps/koco.png", mode = "644" },
 ]
 
 
